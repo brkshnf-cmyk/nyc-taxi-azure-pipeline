@@ -1,0 +1,30 @@
+{
+    "name": "ds_sink_yellow_taxi_bronze",
+    "properties": {
+        "linkedServiceName": {
+            "referenceName": "ls_adls_nyctaxi",
+            "type": "LinkedServiceReference"
+        },
+        "parameters": {
+            "ds_year": {
+                "type": "string"
+            },
+            "ds_month": {
+                "type": "string"
+            }
+        },
+        "annotations": [],
+        "type": "Binary",
+        "typeProperties": {
+            "location": {
+                "type": "AzureBlobFSLocation",
+                "folderPath": {
+                    "value": "yellow-taxi/year=@{dataset().ds_year}/month=@{dataset().ds_month}",
+                    "type": "Expression"
+                },
+                "fileSystem": "bronze"
+            }
+        }
+    },
+    "type": "Microsoft.DataFactory/factories/datasets"
+}

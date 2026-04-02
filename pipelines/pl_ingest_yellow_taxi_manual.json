@@ -1,0 +1,88 @@
+{
+    "name": "pl_ingest_yellow_taxi_manual",
+    "properties": {
+        "activities": [
+            {
+                "name": "copy_yellow_taxi_parquet",
+                "type": "Copy",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "BinarySource",
+                        "storeSettings": {
+                            "type": "HttpReadSettings",
+                            "requestMethod": "GET"
+                        },
+                        "formatSettings": {
+                            "type": "BinaryReadSettings"
+                        }
+                    },
+                    "sink": {
+                        "type": "BinarySink",
+                        "storeSettings": {
+                            "type": "AzureBlobFSWriteSettings"
+                        }
+                    },
+                    "enableStaging": false
+                },
+                "inputs": [
+                    {
+                        "referenceName": "ds_http_yellow_taxi_source",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "ds_year": {
+                                "value": "@pipeline().parameters.p_year",
+                                "type": "Expression"
+                            },
+                            "ds_month": {
+                                "value": "@pipeline().parameters.p_month",
+                                "type": "Expression"
+                            }
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "ds_sink_yellow_taxi_bronze",
+                        "type": "DatasetReference",
+                        "parameters": {
+                            "ds_year": {
+                                "value": "@pipeline().parameters.p_year",
+                                "type": "Expression"
+                            },
+                            "ds_month": {
+                                "value": "@pipeline().parameters.p_month",
+                                "type": "Expression"
+                            }
+                        }
+                    }
+                ]
+            }
+        ],
+        "parameters": {
+            "p_year": {
+                "type": "string",
+                "defaultValue": "2026"
+            },
+            "p_day": {
+                "type": "string",
+                "defaultValue": "01"
+            },
+            "p_month": {
+                "type": "string",
+                "defaultValue": "02"
+            }
+        },
+        "annotations": [],
+        "lastPublishTime": "2026-04-02T16:16:09Z"
+    },
+    "type": "Microsoft.DataFactory/factories/pipelines"
+}

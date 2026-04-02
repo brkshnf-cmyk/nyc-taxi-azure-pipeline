@@ -1,0 +1,31 @@
+{
+    "name": "tr_tumbling_yellow_taxi_daily",
+    "properties": {
+        "annotations": [],
+        "runtimeState": "Started",
+        "pipeline": {
+            "pipelineReference": {
+                "referenceName": "pl_ingest_yellow_taxi_manual",
+                "type": "PipelineReference"
+            },
+            "parameters": {
+                "p_year": "@formatDateTime(trigger().outputs.windowStartTime, 'yyyy')",
+                "p_day": "@formatDateTime(trigger().outputs.windowStartTime, 'dd')",
+                "p_month": "@formatDateTime(trigger().outputs.windowStartTime, 'MM')"
+            }
+        },
+        "type": "TumblingWindowTrigger",
+        "typeProperties": {
+            "frequency": "Hour",
+            "interval": 24,
+            "startTime": "2024-01-01T06:00:00Z",
+            "endTime": "2025-12-31T06:00:00Z",
+            "delay": "00:00:00",
+            "maxConcurrency": 5,
+            "retryPolicy": {
+                "intervalInSeconds": 30
+            },
+            "dependsOn": []
+        }
+    }
+}

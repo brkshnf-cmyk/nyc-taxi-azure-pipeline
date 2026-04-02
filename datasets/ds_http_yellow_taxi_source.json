@@ -1,0 +1,29 @@
+{
+    "name": "ds_http_yellow_taxi_source",
+    "properties": {
+        "linkedServiceName": {
+            "referenceName": "ls_http_tlc",
+            "type": "LinkedServiceReference"
+        },
+        "parameters": {
+            "ds_year": {
+                "type": "string"
+            },
+            "ds_month": {
+                "type": "string"
+            }
+        },
+        "annotations": [],
+        "type": "Binary",
+        "typeProperties": {
+            "location": {
+                "type": "HttpServerLocation",
+                "relativeUrl": {
+                    "value": "/trip-data/yellow_tripdata_@{dataset().ds_year}-@{dataset().ds_month}.parquet",
+                    "type": "Expression"
+                }
+            }
+        }
+    },
+    "type": "Microsoft.DataFactory/factories/datasets"
+}
