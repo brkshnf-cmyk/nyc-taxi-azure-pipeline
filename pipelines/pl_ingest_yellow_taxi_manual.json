@@ -5,11 +5,18 @@
             {
                 "name": "copy_yellow_taxi_parquet",
                 "type": "Copy",
-                "dependsOn": [],
+                "dependsOn": [
+                    {
+                        "activity": "sp_log_start",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
                 "policy": {
-                    "timeout": "0.12:00:00",
-                    "retry": 0,
-                    "retryIntervalInSeconds": 30,
+                    "timeout": "0.1:00:00",
+                    "retry": 3,
+                    "retryIntervalInSeconds": 60,
                     "secureOutput": false,
                     "secureInput": false
                 },
@@ -65,6 +72,146 @@
                         }
                     }
                 ]
+            },
+            {
+                "name": "sp_log_start",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[usp_log_pipeline_start]",
+                    "storedProcedureParameters": {
+                        "p_day": {
+                            "value": "@pipeline().parameters.p_day",
+                            "type": "String"
+                        },
+                        "p_month": {
+                            "value": "@pipeline().parameters.p_month",
+                            "type": "String"
+                        },
+                        "p_year": {
+                            "value": "@pipeline().parameters.p_year",
+                            "type": "String"
+                        },
+                        "pipeline_name": {
+                            "value": "@pipeline().Pipeline",
+                            "type": "String"
+                        },
+                        "run_id": {
+                            "value": "@pipeline().RunId",
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_sql_control",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "sp_log_end",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "copy_yellow_taxi_parquet",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[usp_log_pipeline_end]",
+                    "storedProcedureParameters": {
+                        "bytes_written": {
+                            "value": "@activity('copy_yellow_taxi_parquet').output.dataWritten",
+                            "type": "Int64"
+                        },
+                        "error_message": {
+                            "value": "NA",
+                            "type": "String"
+                        },
+                        "files_written": {
+                            "value": "@activity('copy_yellow_taxi_parquet').output.filesWritten",
+                            "type": "Int64"
+                        },
+                        "run_id": {
+                            "value": "@pipeline().RunId",
+                            "type": "String"
+                        },
+                        "status": {
+                            "value": "SUCCESS",
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_sql_control",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "sp_log_failure",
+                "type": "SqlServerStoredProcedure",
+                "dependsOn": [
+                    {
+                        "activity": "copy_yellow_taxi_parquet",
+                        "dependencyConditions": [
+                            "Failed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "storedProcedureName": "[dbo].[usp_log_pipeline_end]",
+                    "storedProcedureParameters": {
+                        "bytes_written": {
+                            "value": "0",
+                            "type": "Int64"
+                        },
+                        "error_message": {
+                            "value": "@activity('copy_yellow_taxi_parquet').output.errors[0].Message",
+                            "type": "String"
+                        },
+                        "files_written": {
+                            "value": "0",
+                            "type": "Int64"
+                        },
+                        "run_id": {
+                            "value": "@pipeline().RunId",
+                            "type": "String"
+                        },
+                        "status": {
+                            "value": "FAILED",
+                            "type": "String"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_sql_control",
+                    "type": "LinkedServiceReference"
+                }
             }
         ],
         "parameters": {
