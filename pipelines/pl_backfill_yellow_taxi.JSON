@@ -1,0 +1,63 @@
+{
+    "name": "pl_backfill_yellow_taxi",
+    "properties": {
+        "activities": [
+            {
+                "name": "foreach_months",
+                "type": "ForEach",
+                "dependsOn": [],
+                "userProperties": [],
+                "typeProperties": {
+                    "items": {
+                        "value": "@pipeline().parameters.p_months",
+                        "type": "Expression"
+                    },
+                    "isSequential": false,
+                    "batchCount": 4,
+                    "activities": [
+                        {
+                            "name": "execute_ingest_pipeline",
+                            "type": "ExecutePipeline",
+                            "dependsOn": [],
+                            "policy": {
+                                "secureInput": false
+                            },
+                            "userProperties": [],
+                            "typeProperties": {
+                                "pipeline": {
+                                    "referenceName": "pl_ingest_yellow_taxi_manual",
+                                    "type": "PipelineReference"
+                                },
+                                "waitOnCompletion": true,
+                                "parameters": {
+                                    "p_year": "@item().year",
+                                    "p_day": {
+                                        "value": "@item().month",
+                                        "type": "Expression"
+                                    },
+                                    "p_month": "01"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        ],
+        "parameters": {
+            "p_months": {
+                "type": "array",
+                "defaultValue": [
+                    {
+                        "year": "2024",
+                        "month": "01"
+                    },
+                    {
+                        "year": "2024",
+                        "month": "02"
+                    }
+                ]
+            }
+        },
+        "annotations": []
+    }
+}
