@@ -11,6 +11,7 @@ engineering practices on Microsoft Azure.
 ---
 
 ## 🏗️ Architecture
+
 ```
 NYC TLC CDN (HTTP) — monthly Parquet files
         ↓
@@ -20,10 +21,13 @@ Azure Data Factory
   └── Stored Procedure → log to control table
         ↓
 ADLS Gen2 Bronze Layer
-  bronze/yellow-taxi/year=YYYY/month=MM/
+  bronze/yellow-taxi/year=YYYY/month=MM/trip-data/
         ↓
-Azure Synapse Analytics        ← Phase 2
-  Silver → Gold (star schema)
+Azure Synapse Analytics (Serverless SQL Pool)
+  ├── silver.vw_yellow_taxi  ← 13 cleaning rules
+  ├── gold.fact_trips        ← 90.6M clean trips
+  ├── gold.dim_*             ← 5 dimension tables
+  └── gold.vw_*              ← 4 pre-aggregated KPI views
         ↓
 Power BI Dashboard             ← Phase 3
 ```
@@ -36,7 +40,7 @@ Power BI Dashboard             ← Phase 3
 |------|---------|
 | Azure Data Lake Storage Gen2 | Medallion storage — Bronze/Silver/Gold |
 | Azure Data Factory | Orchestration & automated HTTP ingestion |
-| Azure Synapse Analytics | SQL transformation & modelling |
+| Azure Synapse Analytics | SQL transformation & star schema modelling |
 | Azure SQL Database | Pipeline control & logging table |
 | Power BI | Dashboard & reporting |
 | GitHub | Version control |
@@ -44,6 +48,7 @@ Power BI Dashboard             ← Phase 3
 ---
 
 ## 📁 Repository Structure
+
 ```
 nyc-taxi-azure-pipeline/
 ├── pipelines/
@@ -60,10 +65,14 @@ nyc-taxi-azure-pipeline/
 │   ├── ds_sink_yellow_taxi_bronze.json
 │   └── ds_azure_sql_control.json
 ├── sql/
-│   ├── create_pipeline_run_log.sql
-│   ├── usp_log_pipeline_start.sql
-│   ├── usp_log_pipeline_end.sql
-│   └── usp_check_already_loaded.sql
+│   ├── profiling_bronze_analysis.sql
+│   ├── silver_vw_yellow_taxi.sql
+│   ├── gold_dimension_tables.sql
+│   ├── gold_dim_datetime.sql
+│   ├── gold_fact_trips.sql
+│   ├── gold_kpi_queries.sql
+│   ├── data_quality_validation.sql
+│   └── query_optimisation.sql
 └── docs/                        ← architecture diagrams (Phase 5)
 ```
 
@@ -82,10 +91,10 @@ nyc-taxi-azure-pipeline/
 
 ---
 
-## 🔄 Pipelines
+## 🔄 Phase 1 — Ingestion Pipeline
 
 ### pl_ingest_yellow_taxi_manual
-Main ingestion pipeline — designed for one month at a time:
+Main ingestion pipeline — one month at a time:
 - Pulls monthly Parquet files directly from TLC CDN via HTTP
 - Parameterised by year and month
 - Idempotency check — skips if month already successfully loaded
@@ -94,8 +103,8 @@ Main ingestion pipeline — designed for one month at a time:
 - Retry policy: 3 retries, 60 second interval, 1 hour timeout
 
 ### pl_backfill_yellow_taxi
-Bulk backfill pipeline — designed for loading multiple months:
-- Accepts an array of year/month objects as a parameter
+Bulk backfill pipeline — multiple months at once:
+- Accepts array of year/month objects as parameter
 - ForEach loop processes up to 4 months in parallel
 - Calls pl_ingest_yellow_taxi_manual for each month
 - Safe to rerun — idempotency prevents duplicate loads
@@ -108,9 +117,7 @@ Example parameter:
 ]
 ```
 
----
-
-## ⚙️ Trigger
+### Trigger
 
 | Field | Value |
 |-------|-------|
@@ -132,9 +139,7 @@ The tumbling window start date of 2024-01-01 caused ADF to
 automatically backfill all windows from that date to present —
 loading 2 full years of historical data without manual intervention.
 
----
-
-## 🗃️ Control Table — pipeline_run_log
+### Control Table — pipeline_run_log
 
 Every pipeline run is logged to Azure SQL:
 
@@ -152,13 +157,103 @@ Every pipeline run is logged to Azure SQL:
 
 ---
 
+## 🗄️ Phase 2 — Star Schema
+
+```
+                    dim_datetime
+                         |
+dim_vendor ──────── fact_trips ──────── dim_location (pickup)
+dim_payment_type ───────|─────────────── dim_location (dropoff)
+dim_rate_code ──────────|
+```
+
+### Dimensions
+
+| Table | Rows | Description |
+|-------|------|-------------|
+| dim_vendor | 3 | Taxi technology vendors (CMT, VTS) |
+| dim_payment_type | 7 | Payment methods inc Flex Fare (type 0) |
+| dim_rate_code | 7 | Rate types inc JFK/Newark flat rates |
+| dim_location | 265 | NYC taxi zones and boroughs |
+| dim_datetime | Hourly | Time attributes, weekend and peak flags |
+
+### fact_trips
+
+| Property | Value |
+|----------|-------|
+| Grain | One row per completed valid taxi trip |
+| Rows | ~90.6 million clean trips |
+| Coverage | January 2024 — present |
+| Filter | is_valid_trip = 1 AND is_outlier = 0 |
+| Measures | fare, tip, total, distance, duration, speed |
+| Derived | tip_pct, avg_speed_mph |
+
+### Silver Layer — 13 Cleaning Rules
+
+| Rule | Action |
+|------|--------|
+| passenger_count IS NULL | Replace with 0, flag is_passenger_known = 0 |
+| Airport_fee IS NULL | Replace with 0 |
+| cbd_congestion_fee IS NULL | Replace with 0 (2025+ column only) |
+| tip_amount < 0 | Replace with 0 |
+| trip_distance <= 0 | Flag is_valid_trip = 0 |
+| fare_amount <= 0 | Flag is_valid_trip = 0 |
+| total_amount <= 0 | Flag is_valid_trip = 0 |
+| dropoff <= pickup | Flag is_valid_trip = 0 |
+| YEAR(pickup) < 2024 | Flag is_valid_trip = 0 |
+| pickup > GETDATE() | Flag is_valid_trip = 0 |
+| trip_distance > 100 | Flag is_outlier = 1 |
+| fare_amount > 500 | Flag is_outlier = 1 |
+| fare_amount < 0 | Flag is_outlier = 1 |
+
+### Power BI KPI Views
+
+| View | Purpose |
+|------|---------|
+| vw_monthly_kpi | Monthly trips and revenue trends |
+| vw_borough_kpi | Borough comparison by month |
+| vw_zone_kpi | Zone-level detail by month |
+| vw_hourly_pattern | Hourly patterns weekday vs weekend |
+
+---
+
+## 📊 Key Findings — Phase 2
+
+| Metric | Value |
+|--------|-------|
+| Total trips analysed | 90,598,922 |
+| Total revenue | $2.61 billion |
+| Data quality rate | 93.39% valid |
+| Top borough by trips | Manhattan (87% of all trips) |
+| Top zone by trips | Upper East Side South (4.16M) |
+| Top zone by revenue | JFK Airport ($328M) |
+| Busiest hour | 6pm (6.25M trips) |
+| Busiest day | Thursday (14.06M trips) |
+| YoY trip growth | +11.3% (2024 to 2025) |
+| YoY revenue growth | +12.1% (2024 to 2025) |
+| Tip rate trend | 11.32% → 10.06% → 9.09% (declining) |
+| Avg NYC taxi speed | ~11 mph (consistent) |
+
+### Known Data Quality Findings
+
+| Finding | Detail |
+|---------|--------|
+| total_amount reconciliation | $3-5 difference on ~2% of trips due to TLC surcharge restructuring. Use total_amount as definitive revenue figure. |
+| cbd_congestion_fee | New column in 2025 files only. COALESCE returns 0 for 2024 files. |
+| payment_type_id = 0 | Flex Fare introduced 2024 — added to dim_payment_type. |
+| rate_code_id NULL | Flex Fare trips have NULL rate code — COALESCE to 99 (Unknown). |
+
+---
+
 ## 🥉 Bronze Layer Structure
+
 ```
 bronze/
 └── yellow-taxi/
     └── year=YYYY/
         └── month=MM/
-            └── yellow_tripdata_YYYY-MM.parquet
+            └── trip-data/
+                └── yellow_tripdata_YYYY-MM.parquet
 ```
 
 Partitioned by year/month (Hive-style) for partition pruning in
@@ -170,7 +265,7 @@ TLC source publishing frequency.
 ## ✅ Project Progress
 
 - [x] Phase 1 — Ingestion pipeline (complete)
-- [ ] Phase 2 — SQL modelling & star schema
+- [x] Phase 2 — SQL modelling & star schema (complete)
 - [ ] Phase 3 — Power BI dashboard
 - [ ] Phase 4 — Testing & monitoring
 - [ ] Phase 5 — Portfolio packaging
@@ -181,13 +276,18 @@ TLC source publishing frequency.
 
 1. Clone this repo
 2. Create Azure resources: ADLS Gen2, ADF, Azure SQL, Synapse
-3. Deploy linked services from `/linked_services`
-   - Update credentials for your own accounts
+3. Deploy linked services from `/linked_services` — update credentials
 4. Deploy datasets from `/datasets`
 5. Deploy pipelines from `/pipelines`
-6. Run SQL scripts in `/sql` to create control table and procedures
+6. Run Azure SQL scripts to create control table and procedures
 7. Publish and activate `tr_tumbling_yellow_taxi_daily` trigger
-8. Monitor runs in ADF Studio → Monitor → Trigger runs
+8. Run Synapse SQL scripts in order:
+   - `silver_vw_yellow_taxi.sql`
+   - `gold_dimension_tables.sql`
+   - `gold_dim_datetime.sql`
+   - `gold_fact_trips.sql`
+9. Validate with `data_quality_validation.sql`
+10. Connect Power BI to Synapse serverless SQL endpoint
 
 ---
 
@@ -195,8 +295,13 @@ TLC source publishing frequency.
 
 | Decision | Reasoning |
 |----------|-----------|
-| Binary copy at bronze layer | TLC files use ZSTD compression which ADF cannot parse natively. Binary copy lands files unmodified — correct for bronze layer. |
-| Idempotency at month level | Source publishes monthly — checking year+month prevents re-downloading the same file on every daily trigger run |
-| Tumbling window over schedule trigger | Enables automatic backfill of historical data from start date and passes window date to pipeline automatically |
-| Separate backfill pipeline | Keeps concerns separated — daily trigger for ongoing loads, ForEach pipeline for bulk historical loads |
-| Control table in Azure SQL | Full pipeline observability without needing Azure Monitor — every run logged with status, file size and duration |
+| Binary copy at bronze | ZSTD compression not parseable by ADF. Lands files unmodified — correct for bronze layer. |
+| Idempotency at month level | Monthly source — checking year+month prevents re-downloading same file daily. |
+| Tumbling window trigger | Enables automatic backfill from start date, passes date to pipeline automatically. |
+| Separate backfill pipeline | Keeps concerns separated — daily trigger for ongoing, ForEach for bulk historical loads. |
+| Serverless SQL pool | Query data lake directly — no provisioned cluster, pay per TB scanned (~$0.015 per full scan). |
+| Views not tables | No data duplication — silver and gold read bronze on demand. Schema changes apply instantly. |
+| WITH clause in OPENROWSET | Handles schema evolution — cbd_congestion_fee absent in 2024 files, present in 2025. |
+| Pre-aggregated KPI views | Power BI reads summary rows not 90M raw rows — faster refresh, lower cost. |
+| DECIMAL(18,2) for financials | Prevents arithmetic overflow when summing across 90M+ rows. |
+| Control table in Azure SQL | Full pipeline observability without Azure Monitor — status, file size and duration logged per run. |
